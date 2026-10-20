@@ -1,0 +1,182 @@
+# MLP Classification using Iris Dataset
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    ConfusionMatrixDisplay
+)
+
+# --------------------------------------------------
+# 1. Load Iris Dataset
+# --------------------------------------------------
+
+iris = load_iris()
+
+X = iris.data
+y = iris.target
+
+print("Dataset Shape:", X.shape)
+print("Number of Classes:", len(np.unique(y)))
+
+# --------------------------------------------------
+# 2. Split Dataset
+# --------------------------------------------------
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# --------------------------------------------------
+# 3. Feature Scaling
+# --------------------------------------------------
+
+scaler = StandardScaler()
+
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# --------------------------------------------------
+# 4. Define Different MLP Models
+# --------------------------------------------------
+
+models = {
+    "1 Hidden Layer - ReLU": MLPClassifier(
+        hidden_layer_sizes=(10,),
+        activation="relu",
+        solver="adam",
+        max_iter=1000,
+        random_state=42
+    ),
+
+    "2 Hidden Layers - ReLU": MLPClassifier(
+        hidden_layer_sizes=(10, 10),
+        activation="relu",
+        solver="adam",
+        max_iter=1000,
+        random_state=42
+    ),
+
+    "3 Hidden Layers - ReLU": MLPClassifier(
+        hidden_layer_sizes=(10, 10, 10),
+        activation="relu",
+        solver="adam",
+        max_iter=1000,
+        random_state=42
+    ),
+
+    "2 Hidden Layers - Tanh": MLPClassifier(
+        hidden_layer_sizes=(10, 10),
+        activation="tanh",
+        solver="adam",
+        max_iter=1000,
+        random_state=42
+    ),
+
+    "2 Hidden Layers - Logistic": MLPClassifier(
+        hidden_layer_sizes=(10, 10),
+        activation="logistic",
+        solver="adam",
+        max_iter=1000,
+        random_state=42
+    )
+}
+
+# --------------------------------------------------
+# 5. Train and Evaluate Models
+# --------------------------------------------------
+
+results = {}
+
+for name, model in models.items():
+
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+
+    accuracy = accuracy_score(y_test, y_pred)
+
+    results[name] = accuracy
+
+    print("\n-----------------------------------")
+    print(name)
+    print("-----------------------------------")
+    print("Accuracy:", round(accuracy * 100, 2), "%")
+
+# --------------------------------------------------
+# 6. Compare Model Accuracies
+# --------------------------------------------------
+
+print("\n========== MODEL COMPARISON ==========")
+
+for name, accuracy in results.items():
+    print(f"{name}: {accuracy * 100:.2f}%")
+
+# --------------------------------------------------
+# 7. Find Best Model
+# --------------------------------------------------
+
+best_model_name = max(results, key=results.get)
+best_accuracy = results[best_model_name]
+
+print("\nBest Model:", best_model_name)
+print("Best Accuracy:", round(best_accuracy * 100, 2), "%")
+
+# --------------------------------------------------
+# 8. Train Best Model Again
+# --------------------------------------------------
+
+best_model = models[best_model_name]
+
+best_model.fit(X_train, y_train)
+
+y_pred = best_model.predict(X_test)
+
+# --------------------------------------------------
+# 9. Confusion Matrix
+# --------------------------------------------------
+
+cm = confusion_matrix(y_test, y_pred)
+
+print("\nConfusion Matrix:")
+print(cm)
+
+disp = ConfusionMatrixDisplay(
+    confusion_matrix=cm,
+    display_labels=iris.target_names
+)
+
+disp.plot()
+
+plt.title("Confusion Matrix - Best MLP Model")
+plt.show()
+
+# --------------------------------------------------
+# 10. Accuracy Comparison Graph
+# --------------------------------------------------
+
+plt.figure(figsize=(10, 6))
+
+plt.bar(
+    results.keys(),
+    [value * 100 for value in results.values()]
+)
+
+plt.xlabel("MLP Configuration")
+plt.ylabel("Accuracy (%)")
+plt.title("Comparison of MLP Models")
+plt.xticks(rotation=30, ha="right")
+plt.ylim(0, 105)
+
+plt.tight_layout()
+plt.show()
