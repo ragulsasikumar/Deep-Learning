@@ -1,0 +1,162 @@
+
+# GAN Image Generation using LSUN Bedroom Dataset
+# Evaluation: Visual Inspection + Inception Score (IS)
+
+import os
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import tensorflow_datasets as tfds
+
+from tensorflow.keras import layers, Model
+from scipy.stats import entropy
+
+# 1. Load LSUN bedroom dataset
+IMG_SIZE = 64
+BATCH_SIZE = 64
+LATENT_DIM = 100
+
+dataset = tfds.load("lsun/bedroom", split="train", shuffle_files=True)
+
+def preprocess(example):
+    image = tf.image.resize(example["image"], (IMG_SIZE, IMG_SIZE))
+    image = (tf.cast(image, tf.float32) / 127.5) - 1.0
+    return image
+
+train_ds = (
+    dataset.map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
+    .shuffle(1000)
+    .batch(BATCH_SIZE, drop_remainder=True)
+    .take(100)
+    .prefetch(tf.data.AUTOTUNE)
+)
+
+# 2. Build Generator
+def build_generator():
+    model = tf.keras.Sequential([
+        layers.Input(shape=(LATENT_DIM,)),
+        layers.Dense(8 * 8 * 256, use_bias=False),
+        layers.BatchNormalization(),
+        layers.ReLU(),
+        layers.Reshape((8, 8, 256)),
+        layers.Conv2DTranspose(128, 4, strides=2, padding="same",
+                               use_bias=False),
+        layers.BatchNormalization(),
+        layers.ReLU(),
+        layers.Conv2DTranspose(64, 4, strides=2, padding="same",
+                               use_bias=False),
+        layers.BatchNormalization(),
+        layers.ReLU(),
+        layers.Conv2D(3, 3, padding="same", activation="tanh")
+    ])
+    return model
+
+# 3. Build Discriminator
+def build_discriminator():
+    return tf.keras.Sequential([
+        layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
+        layers.Conv2D(64, 4, strides=2, padding="same"),
+        layers.LeakyReLU(0.2),
+        layers.Dropout(0.3),
+        layers.Conv2D(128, 4, strides=2, padding="same"),
+        layers.LeakyReLU(0.2),
+        layers.Dropout(0.3),
+        layers.Conv2D(256, 4, strides=2, padding="same"),
+        layers.LeakyReLU(0.2),
+        layers.Flatten(),
+        layers.Dense(1)
+    ])
+
+generator = build_generator()
+discriminator = build_discriminator()
+
+g_optimizer = tf.keras.optimizers.Adam(0.0002, beta_1=0.5)
+d_optimizer = tf.keras.optimizers.Adam(0.0002, beta_1=0.5)
+bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+
+# 4. GAN training step
+@tf.function
+def train_step(real_images):
+    batch_size = tf.shape(real_images)[0]
+    noise = tf.random.normal([batch_size, LATENT_DIM])
+
+    with tf.GradientTape() as gt, tf.GradientTape() as dt:
+        fake_images = generator(noise, training=True)
+
+        real_output = discriminator(real_images, training=True)
+        fake_output = discriminator(fake_images, training=True)
+
+        g_loss = bce(tf.ones_like(fake_output), fake_output)
+        d_loss = (
+            bce(tf.ones_like(real_output), real_output) +
+            bce(tf.zeros_like(fake_output), fake_output)
+        )
+
+    g_gradients = gt.gradient(g_loss, generator.trainable_variables)
+    d_gradients = dt.gradient(d_loss, discriminator.trainable_variables)
+
+    g_optimizer.apply_gradients(
+        zip(g_gradients, generator.trainable_variables)
+    )
+    d_optimizer.apply_gradients(
+        zip(d_gradients, discriminator.trainable_variables)
+    )
+
+    return g_loss, d_loss
+
+# 5. Train GAN
+EPOCHS = 10
+
+for epoch in range(EPOCHS):
+    g_losses, d_losses = [], []
+
+    for images in train_ds:
+        gl, dl = train_step(images)
+        g_losses.append(float(gl))
+        d_losses.append(float(dl))
+
+    print(f"Epoch {epoch+1}/{EPOCHS} | "
+          f"G Loss: {np.mean(g_losses):.4f} | "
+          f"D Loss: {np.mean(d_losses):.4f}")
+
+# 6. Generate images
+noise = tf.random.normal([16, LATENT_DIM])
+generated_images = generator(noise, training=False)
+generated_images = (generated_images + 1) / 2
+
+plt.figure(figsize=(8, 8))
+for i in range(16):
+    plt.subplot(4, 4, i + 1)
+    plt.imshow(tf.clip_by_value(generated_images[i], 0, 1))
+    plt.axis("off")
+
+plt.suptitle("GAN Generated LSUN Bedroom Images")
+plt.tight_layout()
+plt.show()
+
+# 7. Inception Score using pretrained InceptionV3
+inception = tf.keras.applications.InceptionV3(
+    include_top=True, weights="imagenet"
+)
+
+def inception_score(images, splits=2):
+    images = tf.image.resize(images, (299, 299))
+    images = tf.keras.applications.inception_v3.preprocess_input(
+        images * 255.0
+    )
+    predictions = inception.predict(images, verbose=0)
+    predictions = tf.nn.softmax(predictions, axis=1).numpy()
+
+    scores = []
+    for part in np.array_split(predictions, splits):
+        marginal = np.mean(part, axis=0)
+        kl = part * (
+            np.log(part + 1e-10) - np.log(marginal + 1e-10)
+        )
+        scores.append(np.exp(np.mean(np.sum(kl, axis=1))))
+
+    return float(np.mean(scores))
+
+score = inception_score(generated_images, splits=2)
+print("\nInception Score (IS):", round(score, 4))
+print("Result: GAN training, image generation and evaluation completed.")
