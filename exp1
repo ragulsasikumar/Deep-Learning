@@ -1,0 +1,355 @@
+# ============================================================
+# THREE-LAYER NEURAL NETWORK FOR MNIST DIGIT RECOGNITION
+# Using Backpropagation from Scratch
+# ============================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ------------------------------------------------------------
+# 1. Load MNIST Dataset
+# ------------------------------------------------------------
+
+from tensorflow.keras.datasets import mnist
+
+# Load training and testing data
+(X_train, y_train), (X_test, y_test) = mnist.load_data()
+
+print("Original Training Data Shape:", X_train.shape)
+print("Original Testing Data Shape :", X_test.shape)
+
+# ------------------------------------------------------------
+# 2. Preprocess the Data
+# ------------------------------------------------------------
+
+# Normalize pixel values from 0-255 to 0-1
+X_train = X_train.astype("float32") / 255.0
+X_test = X_test.astype("float32") / 255.0
+
+# Flatten 28x28 images into 784-dimensional vectors
+X_train = X_train.reshape(X_train.shape[0], 784)
+X_test = X_test.reshape(X_test.shape[0], 784)
+
+print("After Flattening:")
+print("Training Data:", X_train.shape)
+print("Testing Data :", X_test.shape)
+
+# ------------------------------------------------------------
+# 3. Convert Labels to One-Hot Encoding
+# ------------------------------------------------------------
+
+def one_hot_encode(y, num_classes=10):
+    result = np.zeros((y.shape[0], num_classes))
+    result[np.arange(y.shape[0]), y] = 1
+    return result
+
+y_train_onehot = one_hot_encode(y_train)
+y_test_onehot = one_hot_encode(y_test)
+
+# ------------------------------------------------------------
+# 4. Define Neural Network Architecture
+# ------------------------------------------------------------
+
+input_size = 784
+hidden_size = 128
+output_size = 10
+
+learning_rate = 0.1
+epochs = 10
+batch_size = 128
+
+# ------------------------------------------------------------
+# 5. Initialize Weights and Biases
+# ------------------------------------------------------------
+
+np.random.seed(42)
+
+# Xavier/He initialization
+W1 = np.random.randn(input_size, hidden_size) * np.sqrt(2 / input_size)
+b1 = np.zeros((1, hidden_size))
+
+W2 = np.random.randn(hidden_size, output_size) * np.sqrt(2 / hidden_size)
+b2 = np.zeros((1, output_size))
+
+# ------------------------------------------------------------
+# 6. Activation Functions
+# ------------------------------------------------------------
+
+# ReLU activation
+def relu(x):
+    return np.maximum(0, x)
+
+# ReLU derivative
+def relu_derivative(x):
+    return (x > 0).astype(float)
+
+# Softmax activation
+def softmax(x):
+    # Numerical stability
+    x = x - np.max(x, axis=1, keepdims=True)
+
+    exp_x = np.exp(x)
+
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+# ------------------------------------------------------------
+# 7. Cross-Entropy Loss
+# ------------------------------------------------------------
+
+def cross_entropy_loss(y_true, y_pred):
+    epsilon = 1e-10
+
+    y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+
+    loss = -np.mean(
+        np.sum(y_true * np.log(y_pred), axis=1)
+    )
+
+    return loss
+
+# ------------------------------------------------------------
+# 8. Forward Propagation
+# ------------------------------------------------------------
+
+def forward_propagation(X):
+
+    # Input → Hidden Layer
+    z1 = np.dot(X, W1) + b1
+    a1 = relu(z1)
+
+    # Hidden → Output Layer
+    z2 = np.dot(a1, W2) + b2
+    a2 = softmax(z2)
+
+    return z1, a1, z2, a2
+
+# ------------------------------------------------------------
+# 9. Backpropagation
+# ------------------------------------------------------------
+
+def backpropagation(X, y, z1, a1, a2):
+
+    m = X.shape[0]
+
+    # Output layer gradient
+    dz2 = a2 - y
+
+    dW2 = np.dot(a1.T, dz2) / m
+    db2 = np.sum(dz2, axis=0, keepdims=True) / m
+
+    # Hidden layer gradient
+    da1 = np.dot(dz2, W2.T)
+
+    dz1 = da1 * relu_derivative(z1)
+
+    dW1 = np.dot(X.T, dz1) / m
+    db1 = np.sum(dz1, axis=0, keepdims=True) / m
+
+    return dW1, db1, dW2, db2
+
+# ------------------------------------------------------------
+# 10. Prediction Function
+# ------------------------------------------------------------
+
+def predict(X):
+
+    _, _, _, probabilities = forward_propagation(X)
+
+    return np.argmax(probabilities, axis=1)
+
+# ------------------------------------------------------------
+# 11. Training Using Backpropagation
+# ------------------------------------------------------------
+
+train_losses = []
+test_losses = []
+train_accuracies = []
+test_accuracies = []
+
+num_samples = X_train.shape[0]
+
+print("\nTraining Started...\n")
+
+for epoch in range(epochs):
+
+    # Shuffle training data
+    indices = np.random.permutation(num_samples)
+
+    X_train_shuffled = X_train[indices]
+    y_train_shuffled = y_train_onehot[indices]
+
+    # Mini-batch training
+    for start in range(0, num_samples, batch_size):
+
+        end = start + batch_size
+
+        X_batch = X_train_shuffled[start:end]
+        y_batch = y_train_shuffled[start:end]
+
+        # Forward propagation
+        z1, a1, z2, a2 = forward_propagation(X_batch)
+
+        # Backpropagation
+        dW1, db1, dW2, db2 = backpropagation(
+            X_batch,
+            y_batch,
+            z1,
+            a1,
+            a2
+        )
+
+        # Update weights and biases
+        W1 -= learning_rate * dW1
+        b1 -= learning_rate * db1
+
+        W2 -= learning_rate * dW2
+        b2 -= learning_rate * db2
+
+    # Calculate training predictions
+    train_probabilities = forward_propagation(X_train)[3]
+    train_predictions = np.argmax(train_probabilities, axis=1)
+
+    train_loss = cross_entropy_loss(
+        y_train_onehot,
+        train_probabilities
+    )
+
+    train_accuracy = np.mean(
+        train_predictions == y_train
+    )
+
+    # Calculate testing predictions
+    test_probabilities = forward_propagation(X_test)[3]
+    test_predictions = np.argmax(test_probabilities, axis=1)
+
+    test_loss = cross_entropy_loss(
+        y_test_onehot,
+        test_probabilities
+    )
+
+    test_accuracy = np.mean(
+        test_predictions == y_test
+    )
+
+    # Store results
+    train_losses.append(train_loss)
+    test_losses.append(test_loss)
+
+    train_accuracies.append(train_accuracy)
+    test_accuracies.append(test_accuracy)
+
+    print(
+        f"Epoch {epoch + 1}/{epochs} | "
+        f"Train Loss: {train_loss:.4f} | "
+        f"Train Accuracy: {train_accuracy * 100:.2f}% | "
+        f"Test Accuracy: {test_accuracy * 100:.2f}%"
+    )
+
+# ------------------------------------------------------------
+# 12. Final Evaluation
+# ------------------------------------------------------------
+
+final_predictions = predict(X_test)
+
+final_accuracy = np.mean(
+    final_predictions == y_test
+)
+
+print("\n======================================")
+print("FINAL RESULTS")
+print("======================================")
+print(f"Test Accuracy: {final_accuracy * 100:.2f}%")
+
+# ------------------------------------------------------------
+# 13. Plot Loss
+# ------------------------------------------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    range(1, epochs + 1),
+    train_losses,
+    marker='o',
+    label='Training Loss'
+)
+
+plt.plot(
+    range(1, epochs + 1),
+    test_losses,
+    marker='o',
+    label='Testing Loss'
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Cross-Entropy Loss")
+plt.title("Training and Testing Loss")
+plt.legend()
+plt.grid(True)
+
+plt.show()
+
+# ------------------------------------------------------------
+# 14. Plot Accuracy
+# ------------------------------------------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    range(1, epochs + 1),
+    np.array(train_accuracies) * 100,
+    marker='o',
+    label='Training Accuracy'
+)
+
+plt.plot(
+    range(1, epochs + 1),
+    np.array(test_accuracies) * 100,
+    marker='o',
+    label='Testing Accuracy'
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy (%)")
+plt.title("Training and Testing Accuracy")
+plt.legend()
+plt.grid(True)
+
+plt.show()
+
+# ------------------------------------------------------------
+# 15. Display Sample Predictions
+# ------------------------------------------------------------
+
+plt.figure(figsize=(12, 6))
+
+for i in range(10):
+
+    plt.subplot(2, 5, i + 1)
+
+    image = X_test[i].reshape(28, 28)
+
+    plt.imshow(image, cmap='gray')
+
+    plt.title(
+        f"Actual: {y_test[i]}\n"
+        f"Predicted: {final_predictions[i]}"
+    )
+
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------
+# 16. Find Incorrect Predictions
+# ------------------------------------------------------------
+
+incorrect = np.where(
+    final_predictions != y_test
+)[0]
+
+print("\nNumber of Incorrect Predictions:",
+      len(incorrect))
+
+print("Number of Correct Predictions:",
+      len(y_test) - len(incorrect))
