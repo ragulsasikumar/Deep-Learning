@@ -1,0 +1,128 @@
+
+import os
+import time
+import zipfile
+import urllib.request
+import pandas as pd
+import matplotlib.pyplot as plt
+import tensorflow as tf
+
+from PIL import Image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import VGG16, ResNet50, InceptionV3
+from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
+from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
+from tensorflow.keras.applications.inception_v3 import preprocess_input as inception_preprocess
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+
+# 1. Download dataset
+url = "https://storage.googleapis.com/mledu-datasets/cats_and_dogs_filtered.zip"
+zip_path = "/content/catsdogs.zip"
+data_path = "/content/cats_and_dogs_filtered"
+
+if not os.path.exists(data_path):
+    urllib.request.urlretrieve(url, zip_path)
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall("/content")
+
+train_dir = data_path + "/train"
+val_dir = data_path + "/validation"
+
+# 2. Prepare data
+IMG_SIZE = 150
+BATCH_SIZE = 32
+
+train_gen = ImageDataGenerator(
+    preprocessing_function=lambda x: x
+)
+
+val_gen = ImageDataGenerator(
+    preprocessing_function=lambda x: x
+)
+
+# Use pixel values in [0,255]; preprocess separately for each model
+train_data = train_gen.flow_from_directory(
+    train_dir, target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE, class_mode="binary", shuffle=True
+)
+
+val_data = val_gen.flow_from_directory(
+    val_dir, target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE, class_mode="binary", shuffle=False
+)
+
+# 3. Build CNN models
+def build_model(name):
+    if name == "VGG16":
+        base = VGG16(weights="imagenet", include_top=False,
+                     input_shape=(IMG_SIZE, IMG_SIZE, 3))
+        prep = vgg_preprocess
+    elif name == "ResNet50":
+        base = ResNet50(weights="imagenet", include_top=False,
+                        input_shape=(IMG_SIZE, IMG_SIZE, 3))
+        prep = resnet_preprocess
+    else:
+        base = InceptionV3(weights="imagenet", include_top=False,
+                           input_shape=(IMG_SIZE, IMG_SIZE, 3))
+        prep = inception_preprocess
+
+    base.trainable = False
+    inputs = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+    x = tf.keras.layers.Lambda(prep)(inputs)
+    x = base(x, training=False)
+    x = GlobalAveragePooling2D()(x)
+    x = Dropout(0.3)(x)
+    outputs = Dense(1, activation="sigmoid")(x)
+
+    model = Model(inputs, outputs)
+    model.compile(optimizer=Adam(0.001),
+                  loss="binary_crossentropy",
+                  metrics=["accuracy"])
+    return model
+
+# 4. Train and evaluate
+results = {}
+
+for name in ["VGG16", "ResNet50", "GoogLeNet"]:
+    print("\nTraining:", name)
+    model = build_model(name)
+    start = time.time()
+
+    history = model.fit(
+        train_data,
+        validation_data=val_data,
+        epochs=2,
+        verbose=1
+    )
+
+    loss, acc = model.evaluate(val_data, verbose=0)
+    results[name] = {
+        "Accuracy (%)": round(acc * 100, 2),
+        "Loss": round(loss, 4),
+        "Time (seconds)": round(time.time() - start, 2)
+    }
+
+    print(name, "Accuracy:", round(acc * 100, 2), "%")
+
+    train_data.reset()
+    val_data.reset()
+
+# 5. Display comparison
+df = pd.DataFrame(results).T
+print("\nCNN PERFORMANCE COMPARISON")
+print(df)
+
+df["Accuracy (%)"].plot(kind="bar", title="CNN Accuracy Comparison")
+plt.ylabel("Accuracy (%)")
+plt.ylim(0, 100)
+plt.tight_layout()
+plt.show()
+
+df["Time (seconds)"].plot(kind="bar", title="CNN Training Time")
+plt.ylabel("Seconds")
+plt.tight_layout()
+plt.show()
+
+print("\nResult: VGG16, ResNet50 and InceptionV3 (GoogLeNet family) compared.")
