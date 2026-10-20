@@ -1,0 +1,101 @@
+
+# Bidirectional RNN vs Feed-Forward Neural Network
+# Airline Passenger Dataset
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import time
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, SimpleRNN, Bidirectional, Flatten
+
+# 1. Load dataset
+url = "https://raw.githubusercontent.com/jbrownlee/Datasets/master/airline-passengers.csv"
+df = pd.read_csv(url)
+
+data = df["Passengers"].values.reshape(-1, 1)
+
+# 2. Normalize data
+scaler = MinMaxScaler()
+data = scaler.fit_transform(data)
+
+# 3. Create sequences
+def create_sequences(data, steps=12):
+    X, y = [], []
+    for i in range(len(data) - steps):
+        X.append(data[i:i+steps])
+        y.append(data[i+steps])
+    return np.array(X), np.array(y)
+
+X, y = create_sequences(data)
+
+# 4. Split chronologically into training and testing
+split = int(len(X) * 0.8)
+X_train, X_test = X[:split], X[split:]
+y_train, y_test = y[:split], y[split:]
+
+# 5. Build Bidirectional RNN
+rnn = Sequential([
+    Bidirectional(SimpleRNN(32), input_shape=(12, 1)),
+    Dense(16, activation="relu"),
+    Dense(1)
+])
+rnn.compile(optimizer="adam", loss="mse")
+
+start = time.time()
+rnn.fit(X_train, y_train, epochs=50, batch_size=16, verbose=0)
+rnn_time = time.time() - start
+
+# 6. Build Feed-Forward Neural Network
+ffn = Sequential([
+    Flatten(input_shape=(12, 1)),
+    Dense(32, activation="relu"),
+    Dense(16, activation="relu"),
+    Dense(1)
+])
+ffn.compile(optimizer="adam", loss="mse")
+
+start = time.time()
+ffn.fit(X_train, y_train, epochs=50, batch_size=16, verbose=0)
+ffn_time = time.time() - start
+
+# 7. Predict and convert to original scale
+rnn_pred = scaler.inverse_transform(rnn.predict(X_test, verbose=0))
+ffn_pred = scaler.inverse_transform(ffn.predict(X_test, verbose=0))
+actual = scaler.inverse_transform(y_test)
+
+# 8. Compare performance
+results = pd.DataFrame({
+    "Model": ["Bidirectional RNN", "Feed-Forward NN"],
+    "MAE": [
+        mean_absolute_error(actual, rnn_pred),
+        mean_absolute_error(actual, ffn_pred)
+    ],
+    "RMSE": [
+        np.sqrt(mean_squared_error(actual, rnn_pred)),
+        np.sqrt(mean_squared_error(actual, ffn_pred))
+    ],
+    "Training Time (seconds)": [rnn_time, ffn_time]
+})
+
+print("MODEL PERFORMANCE COMPARISON")
+print(results.round(2).to_string(index=False))
+
+# 9. Plot predictions
+plt.figure(figsize=(10, 5))
+plt.plot(actual, label="Actual Passengers", marker="o")
+plt.plot(rnn_pred, label="Bidirectional RNN")
+plt.plot(ffn_pred, label="Feed-Forward NN")
+plt.title("Airline Passenger Prediction")
+plt.xlabel("Test Month")
+plt.ylabel("Number of Passengers")
+plt.legend()
+plt.grid()
+plt.show()
+
+print("Result: Both models trained and compared successfully.")
+print("The model with lower RMSE gives better predictions.")
